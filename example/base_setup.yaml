@@ -2,8 +2,9 @@ version: 1.0
 
 # These steps will be executed
 steps:
-  - script: "/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)""
+  - script: '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
     description: "Install Homebrew"
+    completion_check: brew info
   - brewfile: "example/Brewfile-basic"
     description: "Install base Brew packages"
   - script: "example/hello-world.sh"

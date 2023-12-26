@@ -4,7 +4,7 @@ import yaml
 import hashlib
 import subprocess
 from datetime import datetime
-from typing import List, Set
+from typing import List, Set, Union
 from textwrap import dedent
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -14,9 +14,21 @@ ENV_VARS_KEY = 'env_vars'
 STEPS_KEY = 'steps'
 INHERITS_KEY = 'inherits'
 DEFAULT_PLAN_FILE_NAME = 'setmeup_plan.yaml'
+DEFAULT_STATE_FILE = '~/.setmeup.state.yaml'
 BREWFILE_KEY = 'brewfile'
 SCRIPT_KEY = 'script'
-EXECUTION_KEY = 'execute'
+
+STEP_EXECUTION_KEY = 'execute'
+STEP_CHECKSUM_KEY = 'checksum'
+STEP_NAME_KEY = 'name'
+STEP_DESCRIPTION_KEY = 'description'
+STEP_VALIDATION_KEY = 'validation'
+
+CHECKSUM_VALUE_KEY = 'value'
+CHECKSUM_ORIGIN_KEY = 'origin'
+CHECKSUM_TYPE_KEY = 'type'
+CHECKSUM_TYPE_FILE = 'file'
+CHECKSUM_TYPE_STRING = 'string'
 
 class EnvironmentVariable:
     name: str 
@@ -52,12 +64,14 @@ class EnvironmentVariable:
 class SetupStep:
     name: str
     description: str 
+    completion_check: str
     _checksum: str
     _skip: bool
     _type: str = None
 
-    def __init__(self, description: str = None, skip=False) -> None:
+    def __init__(self, description: str = None, completion_check: str = None, skip=False) -> None:
         self.description = description
+        self.completion_check = completion_check
         self._skip = skip
         self._checksum = self.checksum()
     
@@ -67,6 +81,21 @@ class SetupStep:
     def to_plan_format_v1(self):
         raise NotImplementedError
 
+def checksum_from_file(file_path: str) -> str:
+    # Read file content
+    try:
+        with open(file_path, 'r') as file:
+            content = file.read()
+    except FileNotFoundError:
+        raise Exception(f"File '{file_path}' not found")
+
+    # Generate SHA256 checksum
+    sha256 = hashlib.sha256(content.encode('utf-8')).hexdigest()
+    return sha256
+
+
+def checksum_from_string(string: str) -> str:
+    return hashlib.sha256(string.encode('utf-8')).hexdigest()
 
 class BrewfileSetupStep(SetupStep):
     brewfile: str 
@@ -78,34 +107,35 @@ class BrewfileSetupStep(SetupStep):
         super().__init__(*args, **kwargs)
 
     def checksum(self) -> str:
-        # Read brewfile content
-        try:
-            with open(self.brewfile, 'r') as file:
-                brewfile_content = file.read()
-        except FileNotFoundError:
-            raise Exception(f"Brewfile '{self.brewfile}' not found")
-
-        # Generate SHA256 checksum
-        sha256 = hashlib.sha256(brewfile_content.encode('utf-8')).hexdigest()
-        return sha256
+        return checksum_from_file(self.brewfile)
 
     def to_plan_format_v1(self):
-        execute_command = f'brew bundle --file {self.brewfile} --no-lock' 
         return {
-            'name': self.name,
-            'description': self.description,
-            'checksum': self._checksum,
-            EXECUTION_KEY: execute_command
+            STEP_NAME_KEY: self.name,
+            STEP_DESCRIPTION_KEY: self.description,
+            STEP_CHECKSUM_KEY: {
+                CHECKSUM_VALUE_KEY: self._checksum,
+                CHECKSUM_ORIGIN_KEY: self.brewfile,
+                CHECKSUM_TYPE_KEY: CHECKSUM_TYPE_FILE,
+            },
+            STEP_EXECUTION_KEY: f'brew bundle --file {self.brewfile} --no-lock' ,
+            STEP_VALIDATION_KEY: f'brew bundle check --file {self.brewfile}',
         }
-    
 
+    
+# TODO: Add a check if installed attribute (a script or comand that can be executed to check whether it is installed already)
 class ScriptSetupStep(SetupStep):
     script: str 
-    name = 'Execute Script'
     _type = 'script'
 
-    def __init__(self, script: str, *args, **kwargs) -> None:
+    def __init__(
+        self, 
+        script: str, 
+        *args, 
+        **kwargs
+    ) -> None:
         self.script = script
+        self.name = f'Execute Script {script}'
         super().__init__(*args, **kwargs)
 
     @property
@@ -131,18 +161,35 @@ class ScriptSetupStep(SetupStep):
     def checksum(self) -> str:
         script_content = self.get_script_content()
         # Generate SHA256 checksum
-        return hashlib.sha256(script_content.encode('utf-8')).hexdigest()
+        return checksum_from_string(script_content)
     
     def to_plan_format_v1(self):
-        execute_command = f'/bin/bash {self.script}' if self.script_is_file else f'/bin/bash -c {self.script}'
+        if self.script_is_file:
+            execute_command = f'/bin/bash {self.script}'
+            checksum_type = CHECKSUM_TYPE_FILE
+        else:
+            execute_command = self.script
+            checksum_type = CHECKSUM_TYPE_STRING
         
         return {
-            'name': self.name,
-            'description': self.description,
-            'checksum': self._checksum,
-            EXECUTION_KEY: execute_command
+            STEP_NAME_KEY: self.name,
+            STEP_DESCRIPTION_KEY: self.description,
+            STEP_CHECKSUM_KEY: {
+                CHECKSUM_VALUE_KEY: self._checksum,
+                CHECKSUM_ORIGIN_KEY: self.script,
+                CHECKSUM_TYPE_KEY: checksum_type,
+            },
+            STEP_EXECUTION_KEY: execute_command,
+            STEP_VALIDATION_KEY: self.completion_check,
         }
 
+def test_if_checksums_equal(origin: str, checksum_type: str, checksum_value: str) -> bool:
+    if checksum_type == CHECKSUM_TYPE_FILE:
+        return checksum_from_file(origin) == checksum_value
+    elif checksum_type == CHECKSUM_TYPE_STRING:
+        return checksum_from_string(origin) == checksum_value
+    else:
+        raise NotImplementedError(f'Cannot handle checksum type {checksum_type}')
 
 class YamlConfig:
     inherits: List['YamlConfig']
@@ -195,27 +242,28 @@ class YamlConfig:
         # Inherited steps are performed in the order the are specified prior to self.steps
         self.steps = new_steps + self.steps
 
-    def plan(self, state_file='') -> 'Plan':
-        # For now we just assume no state file
-        if state_file is None:
-            return Plan(self)
+    def plan(self) -> 'Plan':
+        return Plan.from_yaml_config(self)
 
 
 class Plan:
     version: str = '1.0'
-    required_env_vars = List[dict]
-    steps_to_execute = List[dict]
+    required_env_vars: List[dict]
+    steps_to_execute: List[dict]
+    _filename: str
 
     def __init__(
             self, 
             version: str = None,
             required_env_vars: List[dict] = None, 
-            steps_to_execute: List[dict] = None
+            steps_to_execute: List[dict] = None,
+            filename: str = None
         ) -> None:
         if version:
             self.version = version
         self.required_env_vars = required_env_vars or []
         self.steps_to_execute = steps_to_execute or []
+        self._filename = filename
         self.logger = logging.getLogger(__name__)
 
     def __repr__(self) -> str:
@@ -232,32 +280,58 @@ class Plan:
     def load_from_file(cls, filename: str = DEFAULT_PLAN_FILE_NAME):
         with open(filename, 'r') as file:
             plan = yaml.safe_load(file)
+
         return cls(
-            version = plan['version'],
-            required_env_vars = plan['required_env_vars'],
-            steps_to_execute = plan['steps_to_execute']
+            version=plan['version'],
+            required_env_vars=plan['required_env_vars'],
+            steps_to_execute=plan['steps_to_execute'],
+            filename=filename
         )
     
     def visualize(self):
-        env_vars_string = '\n'.join(var['env_variable'] for var in self.required_env_vars)
-        steps_to_execute_string = '\n'.join([f"Run {step[EXECUTION_KEY]}" for step in self.steps_to_execute])
+        env_vars_string = '\n'.join(f"👉 {var['env_variable']}" for var in self.required_env_vars)
+        steps_to_execute_string = '\n'.join([f"👉 Run {step[STEP_EXECUTION_KEY]}" for step in self.steps_to_execute])
 
         msg = dedent("""
-        # Execution Plan
+        🚧 Execution Plan 🚧
                      
         ## You will be prompted to provide the following ENV vars
+                     
         {env_vars}
 
         ## The following steps will be executed
+                     
         {steps_to_execute}
         """)
 
-        return msg.format(
+        res = msg.format(
             steps_to_execute=steps_to_execute_string,
             env_vars=env_vars_string
         )
 
+        self.logger.info(res)
+        return res
+
     def apply(self):
+        def check_if_step_ran(step: dict) -> Union[dict, None]:
+            completed = None
+            if step.get(STEP_VALIDATION_KEY):
+                completed = subprocess.call(step[STEP_VALIDATION_KEY], shell=True) == 0
+            return completed
+
+        # Pre checks
+        for step in self.steps_to_execute:
+            # Check whether checksums are still the same (i.e. did any file content change?)
+            checksum_data = step[STEP_CHECKSUM_KEY]            
+            checksum_equal = test_if_checksums_equal(
+                origin=checksum_data[CHECKSUM_ORIGIN_KEY], 
+                checksum_type=checksum_data[CHECKSUM_TYPE_KEY], 
+                checksum_value=checksum_data[CHECKSUM_VALUE_KEY]
+            )
+            if not checksum_equal:
+                self.logger.warning(f"😱 Checksums for step {step[STEP_NAME_KEY]} changed. You need to re-run the plan command.")
+                return 
+            
         # Set required environment variables
         for env_var in self.required_env_vars:
             user_input = input(f"Enter {env_var['name']} ({env_var['description']}): ")
@@ -265,10 +339,31 @@ class Plan:
             if 'store_in' in env_var and env_var['store_in']:
                 with open(env_var['store_in'], 'a') as file:
                     file.write(f'\nexport {env_var["env_variable"]}="{user_input}"')
-
+        
+        # Execute steps
         for step in self.steps_to_execute:
-            self.logger.info(f'Executing Step: {step[EXECUTION_KEY]}')
-            subprocess.run([step[EXECUTION_KEY]], check=True, shell=True)
+            if check_if_step_ran(step):
+                self.logger.info(f'✅ Skipping step {step[STEP_EXECUTION_KEY]} since it already ran')
+                continue
+
+            try:
+                self.logger.info(f'⚪️ Executing Step: {step[STEP_EXECUTION_KEY]}')
+                subprocess.run([step[STEP_EXECUTION_KEY]], check=True, shell=True)
+            except subprocess.CalledProcessError as e:
+                self.logger.error(f"🔥🔥🔥 Step {step['name']} failed 🔥🔥🔥")
+                self.logger.error(e)
+                break
+            
+            validation_passed = check_if_step_ran(step)
+            if validation_passed is None:
+                self.logger.info(f"🟢 Step {step[STEP_NAME_KEY]} completed but could not verify")
+            elif validation_passed:
+                self.logger.info(f"✅ Step {step[STEP_NAME_KEY]} completed")
+            else:
+                self.logger.error(f"🔴 Step {step[STEP_NAME_KEY]} not completed successfully")
+            step['executed_at'] = datetime.now()
+        self.save_to_file(filename=self._filename)
+
 
     def save_to_file(self, filename: str = DEFAULT_PLAN_FILE_NAME):
         plan = {
@@ -280,4 +375,7 @@ class Plan:
 
         with open(filename, 'w') as file:
             yaml.dump(plan, file, default_flow_style=False)
+
+        # Store latest filename information
+        self._filename = filename
     
