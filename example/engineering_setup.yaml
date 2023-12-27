@@ -1,4 +1,4 @@
-version: 1.0
+setmeup_version: 1.0
 
 # Will inherit all steps and env_var configurations from these yaml files
 inherits:
@@ -6,13 +6,11 @@ inherits:
 
 # The user will be promped to provide these env vars if not present
 env_vars:
-  - name: "SET_ME_UP_TEST_1"
+  - name: SET_ME_UP_TEST_1
     description: "A environment variable that will be stored in .zshrc"
-    env_variable: "SET_ME_UP_TEST_1"
     store_in: "test.env"
-  - name: "SET_ME_UP_TEST_2"
+  - name: SET_ME_UP_TEST_2
     description: "A environment variable that is only used for the setup"
-    env_variable: "SET_ME_UP_TEST_2"
 
 # These steps will be executed
 steps:
