@@ -74,7 +74,7 @@ class BrewfileSetupStep(SetupStep):
         return checksum_from_file(self.brewfile)
 
     def to_plan_format_v1(self):
-        validation_command = f'brew bundle check --file {self.brewfile}'
+        validation_command = f'brew bundle check --file {self.brewfile} --verbose'
         return PlanStep(
             name=self.name,
             description=self.description,
