@@ -1,4 +1,4 @@
-# SetMeUp 
+# SetMeUp
 
 SetMeUp is an open-source automation tool for system setup, inspired by Terraform. It simplifies the process of configuring a new machine or environment according to predefined specifications. SetMeUp uses YAML files for configuration, providing a readable and maintainable way of defining setup steps. It operates primarily through two commands: `plan` for generating an execution plan, and `apply` for executing this plan.
 
@@ -70,7 +70,7 @@ We can define multiple types of steps which can have different properties:
 
 #### Script Step
 Can be used to execute an arbitrary shell command or script.
-  
+
 Properties:
   - `script`: Specify a shell command or a script file path.
   - `description`: A brief explanation of what the script does.
@@ -118,3 +118,19 @@ setmeup apply --plan your_plan_file.yaml
 ```
 
 During the apply phase, SetMeUp will prompt for any required environment variables not already set and proceed to execute the setup steps.
+
+
+## Contributing
+
+(Optional) Create a virtual environment for SetMeUp:
+
+```bash
+pyenv virtualenv 3.12.0 setmeup
+pyenv activate setmeup
+```
+
+Install SetMeUp locally by running:
+
+```bash
+pip install -e .
+```

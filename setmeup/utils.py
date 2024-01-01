@@ -2,6 +2,7 @@ import os
 import logging
 import hashlib
 import subprocess
+from typing import Optional
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -23,14 +24,14 @@ def checksum_from_string(string: str) -> str:
     return hashlib.sha256(string.encode('utf-8')).hexdigest()
 
 
-def check_if_step_ran(validation_check_cmd: str):
-    completed = None
+def check_if_step_ran(validation_check_cmd: Optional[str]) -> bool:
+    completed = False
     if validation_check_cmd:
         completed = subprocess.call(validation_check_cmd, shell=True) == 0
     return completed
 
 
-def is_file(string: str = None):
+def is_file(string: Optional[str] = None):
     return string is not None and os.path.isfile(os.path.join(string))
 
 

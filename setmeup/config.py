@@ -1,9 +1,9 @@
 import logging
 import os
 import yaml
-from typing import List, Set
+from typing import List, Optional, Set
 from setmeup.utils import check_if_step_ran, checksum_from_file, checksum_from_string, get_file_content_or_command, is_file
-from setmeup.plan import Plan, PlanStep, PlanStepChechsum, PlanEnvironmentVariable
+from setmeup.plan import Plan, PlanStep, PlanStepChecksum, PlanEnvironmentVariable
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -14,26 +14,25 @@ SCRIPT_KEY = 'script'
 
 
 class EnvironmentVariable:
-    name: str 
-    description: str
-    name: str 
-    store_in: str
+    name: str
+    description: Optional[str]
+    store_in: Optional[str]
 
     def __init__(
-            self, 
-            name: str, 
-            value: str = None,
-            store_in: str = None,
-            description: str = '', 
+            self,
+            name: str,
+            value: Optional[str] = None,
+            store_in: Optional[str] = None,
+            description: str = '',
         ) -> None:
         self.description = description
-        self.name = name 
+        self.name = name
         self.store_in = store_in
         self.value = value
 
     def __hash__(self) -> int:
         return int(hash(self.name))
-    
+
     def to_plan_format_v1(self):
         return PlanEnvironmentVariable(
             description=self.description,
@@ -41,28 +40,30 @@ class EnvironmentVariable:
             store_in=self.store_in,
             value=self.value,
         )
-    
+
 class SetupStep:
     name: str
-    description: str 
-    completion_check: str
+    description: Optional[str]
+    completion_check: Optional[str]
+    env_vars: List[EnvironmentVariable]
     _checksum: str
-    _type: str = None
+    _type: str
 
-    def __init__(self, description: str = None, completion_check: str = None) -> None:
+    def __init__(self, description: Optional[str] = None, completion_check: Optional[str] = None, env_vars: Optional[List[EnvironmentVariable]] = None) -> None:
         self.description = description
         self.completion_check = completion_check
+        self.env_vars = env_vars or []
         self._checksum = self.checksum()
-    
+
     def checksum(self):
         raise NotImplementedError
-    
+
     def to_plan_format_v1(self):
         raise NotImplementedError
-    
+
 
 class BrewfileSetupStep(SetupStep):
-    brewfile: str 
+    brewfile: str
     name = 'Install Brew Bundle'
     _type = 'brewfile'
 
@@ -79,24 +80,24 @@ class BrewfileSetupStep(SetupStep):
             name=self.name,
             description=self.description,
             checksum={
-                'value': self._checksum, 
-                'origin': self.brewfile, 
-                'checksum_type': PlanStepChechsum.TYPE_FILE
+                'value': self._checksum,
+                'origin': self.brewfile,
+                'checksum_type': PlanStepChecksum.TYPE_FILE
             },
             execute=f'brew bundle --file {self.brewfile} --no-lock',
             validation=validation_command,
             skip=check_if_step_ran(validation_command)
         )
 
-    
+
 class ScriptSetupStep(SetupStep):
-    script: str 
+    script: str
     _type = 'script'
 
     def __init__(
-        self, 
-        script: str, 
-        *args, 
+        self,
+        script: str,
+        *args,
         **kwargs
     ) -> None:
         self.script = script
@@ -110,14 +111,14 @@ class ScriptSetupStep(SetupStep):
         script_content = self.get_script_content()
         # Generate SHA256 checksum
         return checksum_from_string(script_content)
-    
+
     def to_plan_format_v1(self):
         if is_file(self.script):
             execute_command = f'/bin/bash {self.script}'
-            checksum_type = PlanStepChechsum.TYPE_FILE
+            checksum_type = PlanStepChecksum.TYPE_FILE
         else:
             execute_command = self.script
-            checksum_type = PlanStepChechsum.TYPE_STRING
+            checksum_type = PlanStepChecksum.TYPE_STRING
 
         validation_command = f'/bin/bash {self.completion_check}' if is_file(self.completion_check) else self.completion_check
 
@@ -125,18 +126,18 @@ class ScriptSetupStep(SetupStep):
             name=self.name,
             description=self.description,
             checksum={
-                'value': self._checksum, 
-                'origin': self.script, 
+                'value': self._checksum,
+                'origin': self.script,
                 'checksum_type': checksum_type
             },
             execute=execute_command,
             validation=validation_command,
             skip=check_if_step_ran(validation_command)
         )
-        
+
 
 class YamlConfig:
-    inherits: List['YamlConfig']
+    inherits: List[str]
     env_vars: Set[EnvironmentVariable]
     steps: List[SetupStep]
 
@@ -179,7 +180,7 @@ class YamlConfig:
             inherited_config.parse_inherited_configs()
             new_env_vars.update(inherited_config.env_vars)
             new_steps += inherited_config.steps
-        
+
         # self.env_vars overwrites inherited env vars
         new_env_vars.update(self.env_vars)
         self.env_vars = new_env_vars
