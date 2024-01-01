@@ -49,10 +49,11 @@ class SetupStep:
     _checksum: str
     _type: str
 
-    def __init__(self, description: Optional[str] = None, completion_check: Optional[str] = None, env_vars: Optional[List[EnvironmentVariable]] = None) -> None:
+    def __init__(self, description: Optional[str] = None, completion_check: Optional[str] = None, env_vars: Optional[List[dict]] = None) -> None:
+        env_vars = env_vars or []
         self.description = description
         self.completion_check = completion_check
-        self.env_vars = env_vars or []
+        self.env_vars = [EnvironmentVariable(**var) for var in env_vars]
         self._checksum = self.checksum()
 
     def checksum(self):
@@ -86,7 +87,8 @@ class BrewfileSetupStep(SetupStep):
             },
             execute=f'brew bundle --file {self.brewfile} --no-lock',
             validation=validation_command,
-            skip=check_if_step_ran(validation_command)
+            skip=check_if_step_ran(validation_command),
+            env_vars=[var.to_plan_format_v1() for var in self.env_vars],
         )
 
 
@@ -132,7 +134,8 @@ class ScriptSetupStep(SetupStep):
             },
             execute=execute_command,
             validation=validation_command,
-            skip=check_if_step_ran(validation_command)
+            skip=check_if_step_ran(validation_command),
+            env_vars=[var.to_plan_format_v1() for var in self.env_vars],
         )
 
 

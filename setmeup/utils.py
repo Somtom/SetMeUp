@@ -24,8 +24,8 @@ def checksum_from_string(string: str) -> str:
     return hashlib.sha256(string.encode('utf-8')).hexdigest()
 
 
-def check_if_step_ran(validation_check_cmd: Optional[str]) -> bool:
-    completed = False
+def check_if_step_ran(validation_check_cmd: Optional[str]) -> Optional[bool]:
+    completed = None
     if validation_check_cmd:
         completed = subprocess.call(validation_check_cmd, shell=True) == 0
     return completed

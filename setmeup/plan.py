@@ -39,6 +39,13 @@ class PlanEnvironmentVariable:
             'value': self.value
         }
 
+    def apply(self):
+        value = self.value
+        if value is None:
+            value = input(f"Enter a value for {self.name} ({self.description}): ")
+        self.set_value(value)
+        self.store_value(value)
+
     def set_value(self, value):
         if os.environ.get(self.name):
             self.logger.info(f'✅ Env variable {self.name} already set in environment')
@@ -113,6 +120,7 @@ class PlanStep:
     validation: Optional[str]
     executed_at: Optional[datetime]
     skip: bool
+    env_vars: List[PlanEnvironmentVariable]
 
     def __init__(
             self,
@@ -122,7 +130,8 @@ class PlanStep:
             validation: Optional[str] = None,
             description:  Optional[str] = None,
             executed_at: Optional[datetime] = None,
-            skip: bool = False
+            env_vars: Optional[List[PlanEnvironmentVariable]] = None,
+            skip: Optional[bool] = False
         ) -> None:
         self.name = name
         self.description = description
@@ -131,6 +140,7 @@ class PlanStep:
         self.validation = validation
         self.executed_at = executed_at
         self.skip = skip or False
+        self.env_vars = env_vars or []
 
     def to_dict(self):
         return {
@@ -139,7 +149,8 @@ class PlanStep:
             'checksum': self.checksum.to_dict(),
             'execute': self.execute,
             'validation': self.validation,
-            'skip': self.skip
+            'skip': self.skip,
+            'env_vars': [var.to_dict() for var in self.env_vars],
         }
 
     @property
@@ -153,6 +164,8 @@ class PlanStep:
         return check_if_step_ran(self.validation)
 
     def run(self):
+        for env_var in self.env_vars:
+            env_var.apply()
         subprocess.run([self.execute], check=True, shell=True)
 
 
@@ -183,6 +196,10 @@ class Plan:
     def load_from_file(cls, filename: str = DEFAULT_PLAN_FILE_NAME):
         with open(filename, 'r') as file:
             plan = yaml.safe_load(file)
+
+        # Instantiate PlanEnvironmentVariable objects
+        for step in plan['steps_to_execute']:
+            step['env_vars'] = [PlanEnvironmentVariable(**var) for var in step['env_vars']]
 
         return cls(
             setmeup_version=plan['setmeup_version'],
@@ -239,11 +256,7 @@ class Plan:
 
         # Set required environment variables
         for env_var in self.required_env_vars:
-            value = env_var.value
-            if value is None:
-                value = input(f"Enter a value for {env_var.name} ({env_var.description}): ")
-            env_var.set_value(value)
-            env_var.store_value(value)
+            env_var.apply()
 
         # Execute steps
         for step in self.steps_to_execute:

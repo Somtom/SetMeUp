@@ -9,3 +9,7 @@ steps:
     description: "Install base Brew packages"
   - script: "example/hello-world.sh"
     description: "Print Hello World"
+    env_vars:
+      - name: "MY_VAR"
+        value: "You"
+      - name: "MY_VAR2" # Needs to be provided by user
